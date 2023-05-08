@@ -18,9 +18,10 @@ router.post("/", async (req, res) => {
 
   const objectNames = JSON.parse(fs.readFileSync("./js_json/objectNames.json"));
   const receivedData = {};
-  const outputFile = "./js_json/data.json";
   const approvedImages = {};
   const deniedImages = {};
+  let responseSent = false;
+  const urlLength = urls.length;
 
   for (let i = 0; i < urls.length; i++) {
     console.log(`Processing_URL (${i}): ${urls[i]}`);
@@ -45,71 +46,55 @@ router.post("/", async (req, res) => {
 
     pythonProcess.on("close", (code) => {
       console.log(`child process exited with code ${code}`);
-      processNextUrl(receivedData, outputFile, processNextUrlCallback);
+      processNextUrl(receivedData);
     });
   }
 
-  function processNextUrl(receivedData, outputFile, callback) {
+  function processNextUrl(receivedData) {
     const processedUrls = Object.keys(receivedData);
 
     if (processedUrls.length === urls.length) {
-      fs.writeFile(outputFile, JSON.stringify(receivedData), (err) => {
-        if (err) throw err;
-        console.log(`Data saved to ${outputFile}`);
+      for (const url of processedUrls) {
+        const imagePredictions = receivedData[url];
+        let isApproved = true;  
+        const animalNames = [];
 
-        fs.readFile(outputFile, (err, data) => {
-          if (err) throw err;
+        for (const prediction of imagePredictions) {
+          const animalName = prediction[0];
+          const confidenceScore = parseFloat(prediction[1]);
 
-          const receivedData = JSON.parse(data);
-
-          for (const url of processedUrls) {
-            const imagePredictions = receivedData[url];
-            let isApproved = true;
-            const animalNames = [];
-
-            for (const prediction of imagePredictions) {
-              const animalName = prediction[0];
-              const confidenceScore = parseFloat(prediction[1]);
-
-              if (objectNames.includes(animalName) || confidenceScore < 0.5) {
-                isApproved = false;
-                break;
-              }
-              animalNames.push(animalName);
-            }
-
-            if (isApproved && animalNames.length > 0) {
-              approvedImages[url] = animalNames.map((name) => [
-                name,
-                imagePredictions.find((pred) => pred[0] === name)[1],
-              ]);
-            } else {
-              deniedImages[url] = imagePredictions;
-            }
+          if (objectNames.includes(animalName) || confidenceScore < 0.5) {
+            isApproved = false;
+            break;
           }
+          animalNames.push(animalName);
+        }
 
-          console.log("Approved images:", approvedImages);
-          console.log("Denied images:", deniedImages); 
+        if (isApproved && animalNames.length > 0) {
+          approvedImages[url] = animalNames.map((name) => [
+            name,
+            imagePredictions.find((pred) => pred[0] === name)[1],
+          ]);
+        } else {
+          deniedImages[url] = imagePredictions;
+        }
+      }
 
-          // Pass the approvedImages and deniedImages to the callback function
-          callback(approvedImages, deniedImages);
-        });
-      });
+      // Combine the approvedImages and deniedImages into a single result object
+      const result = {
+        approvedImages,
+        deniedImages,
+      };
+
+      console.log("Approved images:", approvedImages);
+      console.log("Denied images:", deniedImages);
+      console.log("Result:", JSON.stringify(result, null, 2));
+
+      if (!responseSent) {
+        res.send(result); // Send the response
+        responseSent = true;
+      }
     }
-  }
-
-  // Callback function to handle the response sending logic
-  function processNextUrlCallback(approvedImages, deniedImages) {
-    // Combine the approvedImages and deniedImages into a single result object
-    const result = {
-      approvedImages,
-      deniedImages
-    };
-
-    console.log("Result:", result);
-
-    // Send the result as the response
-    res.send(result);
   }
 });
 
