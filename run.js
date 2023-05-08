@@ -124,17 +124,21 @@ const fs = require("fs");
 console.log("outside dummy");
 
 router.post("/", async (req, res) => {
-
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
   console.log("inside dummy");
   const urls = req.body.urls;
   console.log("image urls: " + urls);
 
-
-  var  imageresult = {};
   const objectNames = JSON.parse(fs.readFileSync("./js_json/objectNames.json"));
   const receivedData = {};
   const outputFile = "./js_json/data.json";
-
+  const approvedImages = {};
+  const deniedImages = {};
+  let responseSent = false;
+  const url_length = urls.length;
 
   for (let i = 0; i < urls.length; i++) {
     console.log(`Processing_URL (${i}): ${urls[i]}`);
@@ -159,79 +163,75 @@ router.post("/", async (req, res) => {
 
     pythonProcess.on("close", (code) => {
       console.log(`child process exited with code ${code}`);
-     // processNextUrl(receivedData, outputFile);
-      imageresult = processNextUrl(receivedData, outputFile,urls);
-      console.log("image url "+JSON.stringify(imageresult));
-     // imageresult = {...imageresult,...processNextUrl(receivedData, outputFile)};
+      processNextUrl(receivedData, outputFile, processNextUrlCallback);
     });
   }
-  // console.log("image url "+JSON.stringify(imageresult));
-  res.send(imageresult);
- 
-});
-function  processNextUrl(receivedData, outputFile, urls) {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  const approvedImages = {};
-  const deniedImages = {};
-  const processedUrls = Object.keys(receivedData);
 
-  if (processedUrls.length === urls.length) {
-    fs.writeFile(outputFile, JSON.stringify(receivedData), (err) => {
-      if (err) throw err;
-      console.log(`Data saved to ${outputFile}`);
+  function processNextUrl(receivedData, outputFile, callback) {
+    const processedUrls = Object.keys(receivedData);
 
-      fs.readFile(outputFile, (err, data) => {
+    if (processedUrls.length === urls.length) {
+      fs.writeFile(outputFile, JSON.stringify(receivedData), (err) => {
         if (err) throw err;
+        console.log(`Data saved to ${outputFile}`);
 
-        const receivedData = JSON.parse(data);
+        fs.readFile(outputFile, (err, data) => {
+          if (err) throw err;
 
-        for (const url of processedUrls) {
-          const imagePredictions = receivedData[url];
-          let isApproved = true;
-          const animalNames = [];
+          const receivedData = JSON.parse(data);
 
-          for (const prediction of imagePredictions) {
-            const animalName = prediction[0];
-            const confidenceScore = parseFloat(prediction[1]);
-            
-            if (objectNames.includes(animalName) || confidenceScore < 0.5) {
-              isApproved = false;
-              break;
+          for (const url of processedUrls) {
+            const imagePredictions = receivedData[url];
+            let isApproved = true;
+            const animalNames = [];
+
+            for (const prediction of imagePredictions) {
+              const animalName = prediction[0];
+              const confidenceScore = parseFloat(prediction[1]);
+
+              if (objectNames.includes(animalName) || confidenceScore < 0.5) {
+                isApproved = false;
+                break;
+              }
+              animalNames.push(animalName);
             }
-            animalNames.push(animalName);
-          }
-          
-          if (isApproved && animalNames.length > 0) {
-            approvedImages[url] = animalNames.map((name) => [
-              name,
-              imagePredictions.find((pred) => pred[0] === name)[1],
-            ]);
-          } else {
-            deniedImages[url] = imagePredictions;
-          }
-         // return approvedImages, deniedImages;
-        }
-      });
-      
-        
-      // const resulturls  = {...approvedImages, ...deniedImages};
-      // const result = { ...approvedImages, ...deniedImages };
-      // console.log(result);
-        console.log("Approved images:", approvedImages);
-        console.log("Denied images:", deniedImages); 
 
-        var result_image = {...approvedImages, ...deniedImages}
-        // var objimg = Object.push(approvedImages);
-        // console.log("result:" ,objimg);
-        rl.close();
-        // return resulturls;
-        // res.send(result);
+            if (isApproved && animalNames.length > 0) {
+              approvedImages[url] = animalNames.map((name) => [
+                name,
+                imagePredictions.find((pred) => pred[0] === name)[1],
+              ]);
+            } else {
+              deniedImages[url] = imagePredictions;
+            }
+          }
 
+          console.log("Approved images:", approvedImages);
+          console.log("Denied images:", deniedImages); 
+
+          // Pass the approvedImages and deniedImages to the callback function
+          callback(approvedImages, deniedImages);
+        });
       });
+    }
   }
-}
+
+  // Callback function to handle the response sending logic
+  function processNextUrlCallback(approvedImages, deniedImages) {
+    // Combine the approvedImages and deniedImages into a single result object
+    const result = {
+      approvedImages,
+      deniedImages
+    };
+
+    console.log("Result:", JSON.stringify(result, null, 2));
+
+    // if (receivedData.length === urls.length && !responseSent) {
+    //   res.send(result); // Send the response
+    //   responseSent = true; // 
+    res.send(result); // Send the response
+    
+  }
+});
 
 module.exports = router;
